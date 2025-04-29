@@ -62,57 +62,53 @@ namespace PqcFileEncryptor
                     txtInputFile.Text = ofd.FileName;
 
                     // --- Generate Default Output Path ---
-                    // Only generate a default if the output path is currently empty
-                    if (string.IsNullOrWhiteSpace(txtOutputFile.Text))
+                    try
                     {
-                        try
+                        string inputPath = txtInputFile.Text;
+                        string inputDir = Path.GetDirectoryName(inputPath);
+                        string inputNameWithoutExt = Path.GetFileNameWithoutExtension(inputPath);
+                        string inputExt = Path.GetExtension(inputPath); // Gets the original extension, including the dot
+
+                        string defaultOutputPath = "";
+
+                        // Check if the input looks like an encrypted file already (for decryption suggestion)
+                        if (!string.IsNullOrEmpty(inputExt) && inputExt.Equals(".enc", StringComparison.OrdinalIgnoreCase))
                         {
-                            string inputPath = txtInputFile.Text;
-                            string inputDir = Path.GetDirectoryName(inputPath);
-                            string inputNameWithoutExt = Path.GetFileNameWithoutExtension(inputPath);
-                            string inputExt = Path.GetExtension(inputPath); // Gets the original extension, including the dot
+                            // Suggest removing ".enc" for decryption output
+                            // Get the name *before* the .enc extension
+                            string originalName = Path.GetFileNameWithoutExtension(inputNameWithoutExt); // Handles "file.txt.enc" -> "file.txt"
+                            string originalExt = Path.GetExtension(inputNameWithoutExt); // Gets ".txt" from "file.txt"
+                            defaultOutputPath = Path.Combine(inputDir, originalName + originalExt); // Combine to get "file.txt"
 
-                            string defaultOutputPath = "";
-
-                            // Check if the input looks like an encrypted file already (for decryption suggestion)
-                            if (!string.IsNullOrEmpty(inputExt) && inputExt.Equals(".enc", StringComparison.OrdinalIgnoreCase))
+                            // Optional: Add a suffix if the suggested decrypted name is same as input
+                            if (defaultOutputPath.Equals(inputPath, StringComparison.OrdinalIgnoreCase))
                             {
-                                // Suggest removing ".enc" for decryption output
-                                // Get the name *before* the .enc extension
-                                string originalName = Path.GetFileNameWithoutExtension(inputNameWithoutExt); // Handles "file.txt.enc" -> "file.txt"
-                                string originalExt = Path.GetExtension(inputNameWithoutExt); // Gets ".txt" from "file.txt"
-                                defaultOutputPath = Path.Combine(inputDir, originalName + originalExt); // Combine to get "file.txt"
-
-                                // Optional: Add a suffix if the suggested decrypted name is same as input
-                                if (defaultOutputPath.Equals(inputPath, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    defaultOutputPath = Path.Combine(inputDir, inputNameWithoutExt + "_decrypted"); // e.g., file.enc -> file_decrypted
-                                }
-                                // Optional: Handle cases like "file.enc" where there's no inner extension
-                                if (string.IsNullOrEmpty(originalExt) && !string.IsNullOrEmpty(originalName) && defaultOutputPath.Equals(Path.Combine(inputDir, originalName)))
-                                {
-                                    defaultOutputPath = Path.Combine(inputDir, originalName + "_decrypted"); // e.g. secret.enc -> secret_decrypted
-                                }
-
-
+                                defaultOutputPath = Path.Combine(inputDir, inputNameWithoutExt + "_decrypted"); // e.g., file.enc -> file_decrypted
                             }
-                            else
+                            // Optional: Handle cases like "file.enc" where there's no inner extension
+                            if (string.IsNullOrEmpty(originalExt) && !string.IsNullOrEmpty(originalName) && defaultOutputPath.Equals(Path.Combine(inputDir, originalName)))
                             {
-                                // Suggest adding ".enc" for encryption output
-                                defaultOutputPath = Path.Combine(inputDir, inputNameWithoutExt + inputExt + ".enc");
+                                defaultOutputPath = Path.Combine(inputDir, originalName + "_decrypted"); // e.g. secret.enc -> secret_decrypted
                             }
 
-                            txtOutputFile.Text = defaultOutputPath;
+
                         }
-                        catch (ArgumentException argEx)
+                        else
                         {
-                            // Handle potential errors with invalid path characters if the input path is weird
-                            UpdateStatus($"Could not generate default output path: {argEx.Message}", true);
+                            // Suggest adding ".enc" for encryption output
+                            defaultOutputPath = Path.Combine(inputDir, inputNameWithoutExt + inputExt + ".enc");
                         }
-                        catch (Exception ex) // Catch other potential Path exceptions
-                        {
-                            UpdateStatus($"Error generating default output path: {ex.Message}", true);
-                        }
+
+                        txtOutputFile.Text = defaultOutputPath;
+                    }
+                    catch (ArgumentException argEx)
+                    {
+                        // Handle potential errors with invalid path characters if the input path is weird
+                        UpdateStatus($"Could not generate default output path: {argEx.Message}", true);
+                    }
+                    catch (Exception ex) // Catch other potential Path exceptions
+                    {
+                        UpdateStatus($"Error generating default output path: {ex.Message}", true);
                     }
                     // --- End Generate Default Output Path ---
                 }
@@ -125,16 +121,90 @@ namespace PqcFileEncryptor
             {
                 sfd.Title = "Select Output File Location";
                 sfd.Filter = "Encrypted Files (*.enc)|*.enc|All Files (*.*)|*.*";
-                // Check if input file has an extension to suggest an output name
-                if (!string.IsNullOrWhiteSpace(txtInputFile.Text) && Path.HasExtension(txtInputFile.Text))
+                sfd.FilterIndex = 2; // Start with "All Files" as default might not be .enc
+
+                string initialDirectory = "";
+                string initialFileName = "";
+
+                // --- Try to use the current output path text box content as the default ---
+                if (!string.IsNullOrWhiteSpace(txtOutputFile.Text))
                 {
-                    sfd.FileName = Path.ChangeExtension(txtInputFile.Text, ".enc");
-                }
-                else if (!string.IsNullOrWhiteSpace(txtInputFile.Text))
-                {
-                    sfd.FileName = txtInputFile.Text + ".enc";
+                    try
+                    {
+                        initialFileName = Path.GetFileName(txtOutputFile.Text);
+                        string dir = Path.GetDirectoryName(txtOutputFile.Text);
+                        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                        {
+                            initialDirectory = dir;
+                        }
+                    }
+                    catch (ArgumentException) { /* Ignore invalid path format in textbox */ }
+                    catch (PathTooLongException) { /* Ignore */ }
                 }
 
+                // --- Fallback: If output textbox was empty/invalid, use input file path ---
+                if (string.IsNullOrWhiteSpace(initialFileName))
+                {
+                    if (!string.IsNullOrWhiteSpace(txtInputFile.Text))
+                    {
+                        try
+                        {
+                            // Suggest adding .enc as a fallback default if output wasn't set
+                            string inputFileName = Path.GetFileName(txtInputFile.Text);
+                            initialFileName = inputFileName + ".enc"; // Simple append for fallback
+
+                            string inputDir = Path.GetDirectoryName(txtInputFile.Text);
+                            if (!string.IsNullOrEmpty(inputDir) && Directory.Exists(inputDir))
+                            {
+                                initialDirectory = inputDir; // Use input directory if output dir wasn't available
+                            }
+                        }
+                        catch (ArgumentException) { /* Ignore invalid input path */ }
+                        catch (PathTooLongException) { /* Ignore */ }
+                    }
+                }
+
+                // --- Set SaveFileDialog properties ---
+                if (!string.IsNullOrEmpty(initialDirectory))
+                {
+                    sfd.InitialDirectory = initialDirectory;
+                }
+                else if (!string.IsNullOrWhiteSpace(txtInputFile.Text)) // Second fallback for directory
+                {
+                    try
+                    {
+                        string inputDir = Path.GetDirectoryName(txtInputFile.Text);
+                        if (!string.IsNullOrEmpty(inputDir) && Directory.Exists(inputDir))
+                        {
+                            sfd.InitialDirectory = inputDir;
+                        }
+                    }
+                    catch { } // Ignore errors getting input dir
+                }
+
+
+                sfd.FileName = initialFileName; // Set the determined filename
+
+                // Determine the likely filter based on suggested filename
+                if (!string.IsNullOrEmpty(initialFileName))
+                {
+                    string ext = Path.GetExtension(initialFileName);
+                    if (ext.Equals(".enc", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sfd.Filter = "Encrypted Files (*.enc)|*.enc|All Files (*.*)|*.*";
+                        sfd.FilterIndex = 1; // Default to *.enc
+                        sfd.DefaultExt = "enc";
+                    }
+                    else
+                    {
+                        sfd.Filter = "All Files (*.*)|*.*|Encrypted Files (*.enc)|*.enc";
+                        sfd.FilterIndex = 1; // Default to *.*
+                        sfd.DefaultExt = Path.HasExtension(initialFileName) ? Path.GetExtension(initialFileName).TrimStart('.') : "";
+                    }
+                }
+
+
+                // --- Show Dialog and Update Textbox ---
                 if (sfd.ShowDialog() == DialogResult.OK)
                 {
                     txtOutputFile.Text = sfd.FileName;
